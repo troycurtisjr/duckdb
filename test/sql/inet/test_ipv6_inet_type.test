@@ -1,0 +1,49 @@
+# name: test/sql/inet/test_ipv6_inet_type.test
+# description: Test IPv6 inet type
+# group: [inet]
+
+require inet
+
+statement ok
+PRAGMA enable_verification
+
+query I
+SELECT '2001:db8:100:0:c59b:cef3:a0d1:6de4'::INET;
+----
+2001:db8:100:0:c59b:cef3:a0d1:6de4
+
+# Allow upper case hex values
+query I
+SELECT '2001:DB8:100:0:C59B:CEF3:A0D1:6DE4'::INET;
+----
+2001:db8:100:0:c59b:cef3:a0d1:6de4
+
+query I
+SELECT '2001:db8:100:0:c59b:cef3::/96'::INET;
+----
+2001:db8:100:0:c59b:cef3:0:0/96
+
+# quibble with too many digits
+statement error
+SELECT '2001:db8:100:0:c59b:cef3:a0d189:6de4'::INET;
+----
+
+# Too many quibbles
+statement error
+SELECT '2001:db8:100:0:c59b:cef3:a0d1:6de4:d16d'::INET;
+----
+
+# Not enough quibbles many quibbles
+statement error
+SELECT '2001:db8:100:0:c59b:cef3:a0d1'::INET;
+----
+
+# Invalid subnet mask
+statement error
+SELECT '2001:db8:100:0:c59b:cef3::/266'::INET;
+----
+
+# Invalid characters
+statement error
+SELECT '2001:db8:100:0z:c59b:cef3::/266'::INET;
+----
