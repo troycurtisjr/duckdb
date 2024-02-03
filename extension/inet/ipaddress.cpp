@@ -89,7 +89,30 @@ parse_mask:
 	return true;
 }
 
-// A "quibble" is the 16 bit IPv6 value of up to 4 hex digits separated by colons.
+/*
+  IPv6 addresses are 128-bit values.
+
+  When written, these are broken up into 8 16-bit values and represented as up
+  to 4 hexadecimal digits. Formally, these values are called hextets, but
+  informally they can be called quibbles. This comes from the fact there are 4
+  "nibbles" (4-bit) values, so quad-nibble, or quibble.
+
+  A series of 2 or more zero quibbles can be written as a double-colon, "::".
+  This can be done only once, for the longest run of zero quibbles, in a given
+  address.
+
+  For example:
+
+	2001:db8:0:0:0:cef3:35:363
+
+  becomes
+
+	2001:db8::cef3:35:363
+
+  Both address representations are considered valid, but the compressed form is
+  canonical and should be preferred in textual output. More examples can be
+  found in test cases, such as test/sql/inet/test_ipv6_inet_type.test.
+*/
 static void parseQuibble(uhugeint_t &address, const char *buf, idx_t len) {
 	uint16_t result = 0;
 	for (idx_t c=0; c < len; ++c) {
@@ -133,6 +156,11 @@ static bool TryParseIPv6(string_t input, IPAddress &result, string *error_messag
 			if (first_quibble_count != -1) {
 				return IPAddressError(input, error_message, "Encountered more than one double-colon");
 			}
+			// Special check for another colon, any other invalid character will
+			// be caught in the main loop
+			if (c + 2 < size && data[c + 2] == ':') {
+				return IPAddressError(input, error_message, "Encountered more than two consecutive colons");
+			}
 			first_quibble_count = parsed_quibble_count;
 			++c;
 		}
@@ -175,7 +203,7 @@ static bool TryParseIPv6(string_t input, IPAddress &result, string *error_messag
 		// quibbles (which will be zero) and the quibbles parsed into the second
 		// address.
 		first_address <<= shift_quibbles * IPAddress::IPV6_QUIBBLE_BITS;
-		// Or in the bits from the second address to fill out the lower quibbles
+		// "Or in" the bits from the second address to fill out the lower quibbles
 		first_address |= second_address;
 	}
 	result.address = first_address;
@@ -226,16 +254,69 @@ static string ToStringIPv4(const IPAddress &addr) {
 }
 
 static string ToStringIPv6(const IPAddress &addr) {
+	uint16_t quibbles[IPAddress::IPV6_NUM_QUIBBLE];
+	idx_t largest_zero_run = 0;
+	idx_t largest_zero_start = 0;
+	// The total number of quibbles can't be a start index, so use it to track
+	// when a zero run is not in progress.
+	idx_t this_zero_start = IPAddress::IPV6_NUM_QUIBBLE;
+
+	// Convert the packed bits into quibbles while looking for the maximum run of zeros
+	for (idx_t i=0; i<IPAddress::IPV6_NUM_QUIBBLE; ++i) {
+		int bitshift = (IPAddress::IPV6_NUM_QUIBBLE - 1 - i) * IPAddress::IPV6_QUIBBLE_BITS;
+		quibbles[i] = Hugeint::Cast<uint16_t>((addr.address >> bitshift) & 0xFFFF);
+		if (quibbles[i] == 0 && this_zero_start == IPAddress::IPV6_NUM_QUIBBLE) {
+			this_zero_start = i;
+		} else if (quibbles[i] != 0 && this_zero_start != IPAddress::IPV6_NUM_QUIBBLE) {
+			// This is the end of the current run of zero quibbles
+			idx_t this_run = i - this_zero_start;
+			// Save this run if it is larger than previous runs. If it is equal,
+			// the left-most should be used according to the standard, so keep
+			// the previous start value. Also per the standard, do not count a
+			// single zero quibble as a run.
+			if (this_run > 1 && this_run > largest_zero_run) {
+				largest_zero_run = this_run;
+				largest_zero_start = this_zero_start;
+			}
+			this_zero_start = IPAddress::IPV6_NUM_QUIBBLE;
+		}
+	}
+
+	// Handle a zero run through the end of the address
+	if (this_zero_start != IPAddress::IPV6_NUM_QUIBBLE) {
+		idx_t this_run = IPAddress::IPV6_NUM_QUIBBLE - this_zero_start;
+		if (this_run > 1 && this_run > largest_zero_run) {
+			largest_zero_run = this_run;
+			largest_zero_start = this_zero_start;
+		}
+	}
+
+	const idx_t largest_zero_end = largest_zero_start + largest_zero_run;
 	std::ostringstream result;
 	result << std::hex;
-	for (idx_t i=IPAddress::IPV6_NUM_QUIBBLE; i > 0; --i) {
-		if (result.tellp() > 0) {
+	
+	for (idx_t i=0; i<IPAddress::IPV6_NUM_QUIBBLE; ++i) {
+		if (i > 0) {
 			result << ":";
 		}
-		int bitshift = (i - 1) * IPAddress::IPV6_QUIBBLE_BITS;
-		uint16_t quibble = Hugeint::Cast<uint16_t>((addr.address >> bitshift) & 0xFFFF);
-		result << quibble;
+
+		if (i < largest_zero_end && i >= largest_zero_start) {
+			// Handle the special case of the run being at the beginning
+			if (i == 0) {
+				result << ":";
+			}
+			// Adjust the index to skip past the zero quibbles
+			i = largest_zero_end - 1;
+
+			// Handle the special case of the run being at the end
+			if (i == IPAddress::IPV6_NUM_QUIBBLE - 1) {
+				result << ":";
+			}
+		} else {
+			result << quibbles[i];
+		}
 	}
+	
 	if (addr.mask != IPAddress::IPV6_DEFAULT_MASK) {
 		result << "/" << std::dec << addr.mask;
 	}
@@ -250,8 +331,8 @@ string IPAddress::ToString() const {
 	if (type == IPAddressType::IP_ADDRESS_V6) {
 		return ToStringIPv6(*this);
 	}
-
-	return "Invalid IPAddress";
+	
+	throw ConversionException("Invalid IPAddress");
 }
 
 IPAddress IPAddress::FromString(string_t input) {

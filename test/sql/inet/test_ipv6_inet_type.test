@@ -18,45 +18,59 @@ SELECT '2001:DB8:100:0:C59B:CEF3:A0D1:6DE4'::INET;
 ----
 2001:db8:100:0:c59b:cef3:a0d1:6de4
 
+# Allow a single zero quibble to use double colon notation
+# even though it isn't the proper canonical form.
+query I
+SELECT '2001:DB8:100::C59B:CEF3:A0D1:6DE4'::INET;
+----
+2001:db8:100:0:c59b:cef3:a0d1:6de4
+
 query I
 SELECT '2001:db8:100:0:c59b:cef3::/96'::INET;
 ----
-2001:db8:100:0:c59b:cef3:0:0/96
+2001:db8:100:0:c59b:cef3::/96
 
-query I
-SELECT '2001:db8::cef3:35:363/96'::INET;
+query II
+SELECT '2001:db8::cef3:35:363/96'::INET, '2001:db8:0:0:0:cef3:35:363/96'::INET;
 ----
-2001:db8:0:0:0:cef3:35:363/96
+2001:db8::cef3:35:363/96
+2001:db8::cef3:35:363/96
 
-query I
-SELECT '::1/128'::INET;
+query II
+SELECT '::1/128'::INET, '0:0:0:0:0:0:0:1/128'::INET;;
 ----
-0:0:0:0:0:0:0:1
+::1
+::1
 
-query I
-SELECT '::1'::INET;
+query II
+SELECT '::1'::INET, '0:0:0:0:0:0:0:1'::INET;
 ----
-0:0:0:0:0:0:0:1
+::1
+::1
 
-query I
-SELECT '::'::INET;
+query II
+SELECT '::'::INET, '0:0:0:0:0:0:0:0'::INET;
 ----
-0:0:0:0:0:0:0:0
+::
+::
 
-query I
-SELECT '2001:db8::'::INET;
+query II
+SELECT '2001:db8::'::INET, '2001:db8:0:0:0:0:0:0'::INET;
 ----
-2001:db8:0:0:0:0:0:0
+2001:db8::
+2001:db8::
 
-query I
-SELECT '::1234:5678'::INET;
+query II
+SELECT '::1234:5678'::INET, '0:0:0:0:0:0:1234:5678'::INET;
 ----
-0:0:0:0:0:0:1234:5678
+::1234:5678
+::1234:5678
 
-query I
-SELECT '2001:db8:1::ab9:C0A8:102'::INET;
+query II
+SELECT '2001:db8:1::ab9:C0A8:102'::INET, '2001:db8:1:0:0:ab9:C0A8:102'::INET;
 ----
-2001:db8:1:0:0:ab9:c0a8:102
+2001:db8:1::ab9:c0a8:102
+2001:db8:1::ab9:c0a8:102
 
 # quibble with too many digits
 statement error
@@ -73,9 +87,19 @@ statement error
 SELECT '2001:db8:100:0:c59b:cef3:a0d1'::INET;
 ----
 
+# Not enough quibbles
+statement error
+SELECT ':2:'::INET;
+----
+
 # Too many double colons
 statement error
 SELECT '2001:db8::cef3::363/96'::INET;
+----
+
+# Triple colons are not valid
+statement error
+ SELECT ':::1234:5678'::INET
 ----
 
 # Invalid subnet mask
@@ -85,5 +109,5 @@ SELECT '2001:db8:100:0:c59b:cef3::/266'::INET;
 
 # Invalid characters
 statement error
-SELECT '2001:db8:100:0z:c59b:cef3::/266'::INET;
+SELECT '2001:db8:100:0z:c59b:cef3::/120'::INET;
 ----
