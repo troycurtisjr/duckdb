@@ -90,40 +90,55 @@ parse_mask:
 }
 
 // A "quibble" is the 16 bit IPv6 value of up to 4 hex digits separated by colons.
-static uint16_t parseQuibble(const char *buf, idx_t len) {
+static void parseQuibble(uhugeint_t &address, const char *buf, idx_t len) {
 	uint16_t result = 0;
 	for (idx_t c=0; c < len; ++c) {
 		result = (result << HEX_BITSIZE) + StringUtil::GetHexValue(buf[c]);
 	}
-	return result;
+	address = (address << IPAddress::IPV6_QUIBBLE_BITS) + result;
 }
 
 static bool TryParseIPv6(string_t input, IPAddress &result, string *error_message) {
 	auto data = input.GetData();
 	auto size = input.GetSize();
 	idx_t c = 0;
-	idx_t quibble_count = 0;
-	uhugeint_t address = 0;
+	int parsed_quibble_count = 0;
+	uhugeint_t first_address = 0;
+	uhugeint_t second_address = 0;
+	int first_quibble_count = -1;
 	result.type = IPAddressType::IP_ADDRESS_V6;
 	result.mask = IPAddress::IPV6_DEFAULT_MASK;
-	while (c < size && quibble_count < IPAddress::IPV6_NUM_QUIBBLE) {
+	while (c < size && parsed_quibble_count < IPAddress::IPV6_NUM_QUIBBLE) {
 		// Find and parse the next quibble
 		auto start = c;
 		while (c < size && StringUtil::CharacterIsHex(data[c])) {
 			++c;
 		}
 		idx_t len = c - start;
-		if (len > MAX_QUIBBLE_DIGITS || (c != size && data[c] != ':' && data[c] != '/')) {
+		if (len > MAX_QUIBBLE_DIGITS || (c < size && data[c] != ':' && data[c] != '/')) {
 			return IPAddressError(input, error_message, "Expected 4 or fewer hex digits");
 		}
-		address = (address << IPAddress::IPV6_QUIBBLE_BITS) + parseQuibble(&data[start], len);
-		++quibble_count;
+		
+		if (len > 0 ) {
+			if (first_quibble_count == -1) {
+				parseQuibble(first_address, &data[start], len);
+			} else {
+				parseQuibble(second_address, &data[start], len);
+			}
+			++parsed_quibble_count;
+		}
+
+		// Check for double colon
+		if (c + 1 < size && data[c] == ':' && data[c + 1] == ':') {
+			if (first_quibble_count != -1) {
+				return IPAddressError(input, error_message, "Encountered more than one double-colon");
+			}
+			first_quibble_count = parsed_quibble_count;
+			++c;
+		}
 
 		// Parse the mask if specified
-		if (data[c] == '/') {
-			if (quibble_count != IPAddress::IPV6_NUM_QUIBBLE) {
-				return IPAddressError(input, error_message, "Expected 8 sets of 4 hex digits.");
-			}
+		if (c < size && data[c] == '/') {
 			start = ++c;
 			while (c < size && StringUtil::CharacterIsDigit(data[c])) {
 				++c;
@@ -135,19 +150,35 @@ static bool TryParseIPv6(string_t input, IPAddress &result, string *error_messag
 			if (mask > IPAddress::IPV6_DEFAULT_MASK) {
 				return IPAddressError(input, error_message, "Expected a number between 0 and 128");
 			}
-			result.address = address;
 			result.mask = mask;
-			return true;		
+			break;
 		}
 		++c;
 	}
-	if (quibble_count != IPAddress::IPV6_NUM_QUIBBLE) {
+	
+	if (parsed_quibble_count < IPAddress::IPV6_NUM_QUIBBLE && first_quibble_count == -1) {
 		return IPAddressError(input, error_message, "Expected 8 sets of 4 hex digits.");
 	}
+
 	if (c < size) {
 		return IPAddressError(input, error_message, "Unexpected extra characters");
 	}
-	result.address = address;
+
+	// Special handling if a double colon was encountered
+	if (first_quibble_count != -1) {
+		int missing_quibbles = IPAddress::IPV6_NUM_QUIBBLE - parsed_quibble_count;
+		if (missing_quibbles == 0) {
+			return IPAddressError(input, error_message, "Invalid double-colon, too many hex digits.");
+		}
+		int shift_quibbles = IPAddress::IPV6_NUM_QUIBBLE - first_quibble_count;
+		// Shift the quibbles up in the first address to account for the missing
+		// quibbles (which will be zero) and the quibbles parsed into the second
+		// address.
+		first_address <<= shift_quibbles * IPAddress::IPV6_QUIBBLE_BITS;
+		// Or in the bits from the second address to fill out the lower quibbles
+		first_address |= second_address;
+	}
+	result.address = first_address;
 	return true;
 }
 
@@ -159,19 +190,22 @@ bool IPAddress::TryParse(string_t input, IPAddress &result, string *error_messag
 	while (c < size && StringUtil::CharacterIsHex(data[c])) {
 		c++;
 	}
-	if (c == 0) {
-		return IPAddressError(input, error_message, "Expected a number");
-	}
 	if (c == size) {
 		return IPAddressError(input, error_message, "Expected an IP address");
 	}
-	if (data[c] == '.') {
-		return TryParseIPv4(input, result, error_message);
-	}
+
+	// IPv6 can start with a colon
 	if (data[c] == ':') {
 		return TryParseIPv6(input, result, error_message);
 	}
 
+	if (c == 0) {
+		return IPAddressError(input, error_message, "Expected a number");
+	}
+	if (data[c] == '.') {
+		return TryParseIPv4(input, result, error_message);
+	}
+	
 	return IPAddressError(input, error_message, "Expected an IP address");
 }
 
