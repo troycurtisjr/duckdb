@@ -138,8 +138,41 @@ static bool TryParseIPv6(string_t input, IPAddress &result, string *error_messag
 			++c;
 		}
 		idx_t len = c - start;
-		if (len > MAX_QUIBBLE_DIGITS || (c < size && data[c] != ':' && data[c] != '/')) {
+		if (len > MAX_QUIBBLE_DIGITS) {
 			return IPAddressError(input, error_message, "Expected 4 or fewer hex digits");
+		}
+
+		if (c < size && data[c] == '.') {
+			// This might be the IPv4 dotted decimal form, but it must occur at the end
+			// so find the full length, and confirm only valid characters are present.
+			c = start;
+			while (c < size && (StringUtil::CharacterIsDigit(data[c]) || data[c] == '.')) {
+				++c;
+			}
+
+			// c must either be at the end, or pointing to the "/" of the prefix mask.
+			if (c < size && data[c] != '/') {
+				return IPAddressError(input, error_message, "IPv4 format can only be used for the final 2 quibbles.");
+			}
+
+			IPAddress ipv4;
+			if (!TryParseIPv4(string_t(&data[start], c - start), ipv4, error_message)) {
+				return false;
+			}
+
+			// Put the ipv4 parsed 2 quibbles into the proper address location.
+			const int bitshift = 2 * IPAddress::IPV6_QUIBBLE_BITS;
+			if (first_quibble_count == -1) {
+				first_address = (first_address << bitshift) | ipv4.address;
+			} else {
+				second_address = (second_address << bitshift) | ipv4.address;
+			}
+			parsed_quibble_count += 2;
+			continue;
+		}
+
+		if (c < size && data[c] != ':' && data[c] != '/') {
+			return IPAddressError(input, error_message, "Unexpected character found");
 		}
 		
 		if (len > 0 ) {
@@ -237,26 +270,26 @@ bool IPAddress::TryParse(string_t input, IPAddress &result, string *error_messag
 	return IPAddressError(input, error_message, "Expected an IP address");
 }
 
-static string ToStringIPv4(const IPAddress &addr) {
+static string ToStringIPv4(const hugeint_t &address, const uint8_t mask) {
 	string result;
 	for (idx_t i = 0; i < 4; i++) {
 		if (i > 0) {
 			result += ".";
 		}
-		uint8_t byte = Hugeint::Cast<uint8_t>((addr.address >> (3 - i) * 8) & 0xFF);
+		uint8_t byte = Hugeint::Cast<uint8_t>((address >> (3 - i) * 8) & 0xFF);
 		auto str = to_string(byte);
 		result += str;
 	}
-	if (addr.mask != IPAddress::IPV4_DEFAULT_MASK) {
-		result += "/" + to_string(addr.mask);
+	if (mask != IPAddress::IPV4_DEFAULT_MASK) {
+		result += "/" + to_string(mask);
 	}
 	return result;
 }
 
 static string ToStringIPv6(const IPAddress &addr) {
 	uint16_t quibbles[IPAddress::IPV6_NUM_QUIBBLE];
-	idx_t largest_zero_run = 0;
-	idx_t largest_zero_start = 0;
+	idx_t zero_run = 0;
+	idx_t zero_start = 0;
 	// The total number of quibbles can't be a start index, so use it to track
 	// when a zero run is not in progress.
 	idx_t this_zero_start = IPAddress::IPV6_NUM_QUIBBLE;
@@ -274,9 +307,9 @@ static string ToStringIPv6(const IPAddress &addr) {
 			// the left-most should be used according to the standard, so keep
 			// the previous start value. Also per the standard, do not count a
 			// single zero quibble as a run.
-			if (this_run > 1 && this_run > largest_zero_run) {
-				largest_zero_run = this_run;
-				largest_zero_start = this_zero_start;
+			if (this_run > 1 && this_run > zero_run) {
+				zero_run = this_run;
+				zero_start = this_zero_start;
 			}
 			this_zero_start = IPAddress::IPV6_NUM_QUIBBLE;
 		}
@@ -285,13 +318,13 @@ static string ToStringIPv6(const IPAddress &addr) {
 	// Handle a zero run through the end of the address
 	if (this_zero_start != IPAddress::IPV6_NUM_QUIBBLE) {
 		idx_t this_run = IPAddress::IPV6_NUM_QUIBBLE - this_zero_start;
-		if (this_run > 1 && this_run > largest_zero_run) {
-			largest_zero_run = this_run;
-			largest_zero_start = this_zero_start;
+		if (this_run > 1 && this_run > zero_run) {
+			zero_run = this_run;
+			zero_start = this_zero_start;
 		}
 	}
 
-	const idx_t largest_zero_end = largest_zero_start + largest_zero_run;
+	const idx_t zero_end = zero_start + zero_run;
 	std::ostringstream result;
 	result << std::hex;
 	
@@ -300,18 +333,33 @@ static string ToStringIPv6(const IPAddress &addr) {
 			result << ":";
 		}
 
-		if (i < largest_zero_end && i >= largest_zero_start) {
+		if (i < zero_end && i >= zero_start) {
 			// Handle the special case of the run being at the beginning
 			if (i == 0) {
 				result << ":";
 			}
 			// Adjust the index to skip past the zero quibbles
-			i = largest_zero_end - 1;
+			i = zero_end - 1;
 
 			// Handle the special case of the run being at the end
 			if (i == IPAddress::IPV6_NUM_QUIBBLE - 1) {
 				result << ":";
 			}
+		} else if (
+			// Deprecated IPv4 form with all leading zeros (except handle special case ::1)
+			   (i == 6 && zero_start == 0 && zero_end == 6
+			    && quibbles[7] != 1)
+			// Ipv4-mapped addresses: ::ffff:111.222.33.44
+			|| (i == 6 && zero_start == 0 && zero_end == 5
+			    && quibbles[5] == 0xffff)
+			// Ipv4 translated addresses: ::ffff:0:111.222.33.44
+			|| (i == 6 && zero_start == 0 && zero_end == 4 
+			    && quibbles[4] == 0xffff && quibbles[5] == 0)
+		) {
+			// Pass along the lower 2 quibbles, and use the IPv4 default mask to suppress
+			// ToStringIPv4 from trying to print a mask value
+			result << ToStringIPv4(addr.address & 0xffffffff, IPAddress::IPV4_DEFAULT_MASK);
+			break;
 		} else {
 			result << quibbles[i];
 		}
@@ -325,7 +373,7 @@ static string ToStringIPv6(const IPAddress &addr) {
 
 string IPAddress::ToString() const {
 	if (type == IPAddressType::IP_ADDRESS_V4) {
-		return ToStringIPv4(*this);
+		return ToStringIPv4(this->address, this->mask);
 	}
 
 	if (type == IPAddressType::IP_ADDRESS_V6) {

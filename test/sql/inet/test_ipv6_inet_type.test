@@ -61,16 +61,44 @@ SELECT '2001:db8::'::INET, '2001:db8:0:0:0:0:0:0'::INET;
 2001:db8::
 
 query II
-SELECT '::1234:5678'::INET, '0:0:0:0:0:0:1234:5678'::INET;
+SELECT '::1234:5678:9abc'::INET, '0:0:0:0:0:1234:5678:9abc'::INET;
 ----
-::1234:5678
-::1234:5678
+::1234:5678:9abc
+::1234:5678:9abc
 
 query II
 SELECT '2001:db8:1::ab9:C0A8:102'::INET, '2001:db8:1:0:0:ab9:C0A8:102'::INET;
 ----
 2001:db8:1::ab9:c0a8:102
 2001:db8:1::ab9:c0a8:102
+
+# IPv4 notation
+query II
+SELECT '64:ff9b::192.0.2.128/96'::INET, '64:ff9b::c000:280/96'::INET;
+----
+64:ff9b::c000:280/96
+64:ff9b::c000:280/96
+
+# IPv4 notation: deprecated (but supported) IPv4 compatible IPv6 Address
+query II
+SELECT '::192.0.2.128/96'::INET, '::c000:280/96'::INET;
+----
+::192.0.2.128/96
+::192.0.2.128/96
+
+# IPv4 notation: ipv4-mapped IPv6 addresses
+query II
+SELECT '::ffff:192.0.2.128/96'::INET, '::ffff:c000:280/96'::INET;
+----
+::ffff:192.0.2.128/96
+::ffff:192.0.2.128/96
+
+# IPv4 notation: ipv4 translated addresses
+query II
+SELECT '::ffff:0:192.0.2.128/96'::INET, '::ffff:0:c000:280/96'::INET;
+----
+::ffff:0:192.0.2.128/96
+::ffff:0:192.0.2.128/96
 
 # quibble with too many digits
 statement error
@@ -110,4 +138,9 @@ SELECT '2001:db8:100:0:c59b:cef3::/266'::INET;
 # Invalid characters
 statement error
 SELECT '2001:db8:100:0z:c59b:cef3::/120'::INET;
+----
+
+# Invalid use of the IPv4 format
+statement error
+SELECT '64:ff9b::192.0.2.128:1:3/96'::INET;
 ----
