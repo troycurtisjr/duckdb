@@ -21,7 +21,7 @@ void InetExtension::Load(DuckDB &db) {
 	// add the "inet" type
 	child_list_t<LogicalType> children;
 	children.push_back(make_pair("ip_type", LogicalType::UTINYINT));
-	children.push_back(make_pair("address", LogicalType::HUGEINT));
+	children.push_back(make_pair("address", LogicalType::UHUGEINT));
 	children.push_back(make_pair("mask", LogicalType::USMALLINT));
 	auto inet_type = LogicalType::STRUCT(std::move(children));
 	inet_type.SetAlias(INET_TYPE_NAME);
@@ -38,8 +38,11 @@ void InetExtension::Load(DuckDB &db) {
 	                                ScalarFunction("host", {inet_type}, LogicalType::VARCHAR, INetFunctions::Host));
 
 	// Add - function with ALTER_ON_CONFLICT
-	ScalarFunction substract_fun("-", {inet_type, LogicalType::BIGINT}, inet_type, INetFunctions::Subtract);
+	ScalarFunction substract_fun("-", {inet_type, LogicalType::HUGEINT}, inet_type, INetFunctions::Subtract);
 	ExtensionUtil::AddFunctionOverload(*db.instance, substract_fun);
+
+	ScalarFunction add_fun("+", {inet_type, LogicalType::HUGEINT}, inet_type, INetFunctions::Add);
+	ExtensionUtil::AddFunctionOverload(*db.instance, add_fun);
 }
 
 std::string InetExtension::Name() {
