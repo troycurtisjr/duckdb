@@ -21,7 +21,9 @@ void InetExtension::Load(DuckDB &db) {
 	// add the "inet" type
 	child_list_t<LogicalType> children;
 	children.push_back(make_pair("ip_type", LogicalType::UTINYINT));
-	children.push_back(make_pair("address", LogicalType::UHUGEINT));
+	// The address type would ideally be UHUGEINT, but the initial version was HUGEINT
+	// so maintain backwards-compatibility with db written with older versions.
+	children.push_back(make_pair("address", LogicalType::HUGEINT));
 	children.push_back(make_pair("mask", LogicalType::USMALLINT));
 	auto inet_type = LogicalType::STRUCT(std::move(children));
 	inet_type.SetAlias(INET_TYPE_NAME);

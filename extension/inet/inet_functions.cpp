@@ -11,7 +11,19 @@
 
 namespace duckdb {
 
-using INET_TYPE = StructTypeTernary<uint8_t, uhugeint_t, uint16_t>;
+// The address field is better represented as a uhugeint_t, but the original implementation
+// used hugeint_t so maintain backward-compatibility. Operations on the address values will 
+// used the unsigned variant, so use the functions below to convert to/from the compatible
+// representation.
+using INET_TYPE = StructTypeTernary<uint8_t, hugeint_t, uint16_t>;
+
+static uhugeint_t from_compat_addr(hugeint_t compat_addr) {
+	return static_cast<uhugeint_t>(compat_addr);
+}
+
+static hugeint_t to_compat_addr(uhugeint_t new_addr) {
+	return static_cast<hugeint_t>(new_addr);
+}
 
 bool INetFunctions::CastVarcharToINET(Vector &source, Vector &result, idx_t count, CastParameters &parameters) {
 	auto constant = source.GetVectorType() == VectorType::CONSTANT_VECTOR;
@@ -21,7 +33,7 @@ bool INetFunctions::CastVarcharToINET(Vector &source, Vector &result, idx_t coun
 
 	auto &entries = StructVector::GetEntries(result);
 	auto ip_type = FlatVector::GetData<uint8_t>(*entries[0]);
-	auto address_data = FlatVector::GetData<uhugeint_t>(*entries[1]);
+	auto address_data = FlatVector::GetData<hugeint_t>(*entries[1]);
 	auto mask_data = FlatVector::GetData<uint16_t>(*entries[2]);
 
 	auto input = UnifiedVectorFormat::GetData<string_t>(vdata);
@@ -40,7 +52,7 @@ bool INetFunctions::CastVarcharToINET(Vector &source, Vector &result, idx_t coun
 			continue;
 		}
 		ip_type[i] = uint8_t(inet.type);
-		address_data[i] = inet.address;
+		address_data[i] = to_compat_addr(inet.address);
 		mask_data[i] = inet.mask;
 	}
 	if (constant) {
@@ -51,7 +63,8 @@ bool INetFunctions::CastVarcharToINET(Vector &source, Vector &result, idx_t coun
 
 bool INetFunctions::CastINETToVarchar(Vector &source, Vector &result, idx_t count, CastParameters &parameters) {
 	GenericExecutor::ExecuteUnary<INET_TYPE, PrimitiveType<string_t>>(source, result, count, [&](INET_TYPE input) {
-		IPAddress inet(IPAddressType(input.a_val), input.b_val, input.c_val);
+		auto unsigned_addr = from_compat_addr(input.b_val);
+		IPAddress inet(IPAddressType(input.a_val), unsigned_addr, input.c_val);
 		auto str = inet.ToString();
 		return StringVector::AddString(result, str);
 	});
@@ -63,7 +76,8 @@ void INetFunctions::Host(DataChunk &args, ExpressionState &state, Vector &result
 	    args.data[0], result, args.size(), [&](INET_TYPE input) {
 			auto inetType = IPAddressType(input.a_val);
 			auto mask = inetType == IPAddressType::IP_ADDRESS_V4 ? IPAddress::IPV4_DEFAULT_MASK : IPAddress::IPV6_DEFAULT_MASK;
-		    IPAddress inet(inetType, input.b_val, mask);
+			auto unsigned_addr = from_compat_addr(input.b_val);
+		    IPAddress inet(inetType, unsigned_addr, mask);
 		    auto str = inet.ToString();
 		    return StringVector::AddString(result, str);
 	    });
@@ -75,13 +89,14 @@ static INET_TYPE add_implementation(INET_TYPE ip, hugeint_t val) {
 	result.c_val = ip.c_val;
 
 	if (val >= 0) {
-		result.b_val = AddOperatorOverflowCheck::Operation<uhugeint_t, uhugeint_t, uhugeint_t>(
-			ip.b_val, NumericCast::Operation<hugeint_t, uhugeint_t>(val)
-		);
+		result.b_val = to_compat_addr(
+			AddOperatorOverflowCheck::Operation<uhugeint_t, uhugeint_t, uhugeint_t>(
+			from_compat_addr(ip.b_val), NumericCast::Operation<hugeint_t, uhugeint_t>(val)
+		));
 	} else {
-		result.b_val = SubtractOperatorOverflowCheck::Operation<uhugeint_t, uhugeint_t, uhugeint_t>(
-			ip.b_val, NumericCast::Operation<hugeint_t, uhugeint_t>(-val)
-		);
+		result.b_val = to_compat_addr(SubtractOperatorOverflowCheck::Operation<uhugeint_t, uhugeint_t, uhugeint_t>(
+			from_compat_addr(ip.b_val), NumericCast::Operation<hugeint_t, uhugeint_t>(-val)
+		));
 	}
 	
 	return result;
