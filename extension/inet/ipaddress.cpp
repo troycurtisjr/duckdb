@@ -103,11 +103,11 @@ parse_mask:
 
   For example:
 
-	2001:db8:0:0:0:cef3:35:363
+    2001:db8:0:0:0:cef3:35:363
 
   becomes
 
-	2001:db8::cef3:35:363
+    2001:db8::cef3:35:363
 
   Both address representations are considered valid, but the compressed form is
   canonical and should be preferred in textual output. More examples can be
@@ -115,7 +115,7 @@ parse_mask:
 */
 static void parseQuibble(uhugeint_t &address, const char *buf, idx_t len) {
 	uint16_t result = 0;
-	for (idx_t c=0; c < len; ++c) {
+	for (idx_t c = 0; c < len; ++c) {
 		result = (result << HEX_BITSIZE) + StringUtil::GetHexValue(buf[c]);
 	}
 	address = (address << IPAddress::IPV6_QUIBBLE_BITS) + result;
@@ -174,8 +174,8 @@ static bool TryParseIPv6(string_t input, IPAddress &result, string *error_messag
 		if (c < size && data[c] != ':' && data[c] != '/') {
 			return IPAddressError(input, error_message, "Unexpected character found");
 		}
-		
-		if (len > 0 ) {
+
+		if (len > 0) {
 			if (first_quibble_count == -1) {
 				parseQuibble(first_address, &data[start], len);
 			} else {
@@ -216,7 +216,7 @@ static bool TryParseIPv6(string_t input, IPAddress &result, string *error_messag
 		}
 		++c;
 	}
-	
+
 	if (parsed_quibble_count < IPAddress::IPV6_NUM_QUIBBLE && first_quibble_count == -1) {
 		return IPAddressError(input, error_message, "Expected 8 sets of 4 hex digits.");
 	}
@@ -266,7 +266,7 @@ bool IPAddress::TryParse(string_t input, IPAddress &result, string *error_messag
 	if (data[c] == '.') {
 		return TryParseIPv4(input, result, error_message);
 	}
-	
+
 	return IPAddressError(input, error_message, "Expected an IP address");
 }
 
@@ -295,7 +295,7 @@ static string ToStringIPv6(const IPAddress &addr) {
 	idx_t this_zero_start = IPAddress::IPV6_NUM_QUIBBLE;
 
 	// Convert the packed bits into quibbles while looking for the maximum run of zeros
-	for (idx_t i=0; i<IPAddress::IPV6_NUM_QUIBBLE; ++i) {
+	for (idx_t i = 0; i < IPAddress::IPV6_NUM_QUIBBLE; ++i) {
 		int bitshift = (IPAddress::IPV6_NUM_QUIBBLE - 1 - i) * IPAddress::IPV6_QUIBBLE_BITS;
 		quibbles[i] = Hugeint::Cast<uint16_t>((addr.address >> bitshift) & 0xFFFF);
 		if (quibbles[i] == 0 && this_zero_start == IPAddress::IPV6_NUM_QUIBBLE) {
@@ -327,8 +327,8 @@ static string ToStringIPv6(const IPAddress &addr) {
 	const idx_t zero_end = zero_start + zero_run;
 	std::ostringstream result;
 	result << std::hex;
-	
-	for (idx_t i=0; i<IPAddress::IPV6_NUM_QUIBBLE; ++i) {
+
+	for (idx_t i = 0; i < IPAddress::IPV6_NUM_QUIBBLE; ++i) {
 		if (i > 0) {
 			result << ":";
 		}
@@ -346,16 +346,12 @@ static string ToStringIPv6(const IPAddress &addr) {
 				result << ":";
 			}
 		} else if (
-			// Deprecated IPv4 form with all leading zeros (except handle special case ::1)
-			   (i == 6 && zero_start == 0 && zero_end == 6
-			    && quibbles[7] != 1)
-			// Ipv4-mapped addresses: ::ffff:111.222.33.44
-			|| (i == 6 && zero_start == 0 && zero_end == 5
-			    && quibbles[5] == 0xffff)
-			// Ipv4 translated addresses: ::ffff:0:111.222.33.44
-			|| (i == 6 && zero_start == 0 && zero_end == 4 
-			    && quibbles[4] == 0xffff && quibbles[5] == 0)
-		) {
+		    // Deprecated IPv4 form with all leading zeros (except handle special case ::1)
+		    (i == 6 && zero_start == 0 && zero_end == 6 && quibbles[7] != 1)
+		    // Ipv4-mapped addresses: ::ffff:111.222.33.44
+		    || (i == 6 && zero_start == 0 && zero_end == 5 && quibbles[5] == 0xffff)
+		    // Ipv4 translated addresses: ::ffff:0:111.222.33.44
+		    || (i == 6 && zero_start == 0 && zero_end == 4 && quibbles[4] == 0xffff && quibbles[5] == 0)) {
 			// Pass along the lower 2 quibbles, and use the IPv4 default mask to suppress
 			// ToStringIPv4 from trying to print a mask value
 			result << ToStringIPv4(addr.address & 0xffffffff, IPAddress::IPV4_DEFAULT_MASK);
@@ -364,7 +360,7 @@ static string ToStringIPv6(const IPAddress &addr) {
 			result << quibbles[i];
 		}
 	}
-	
+
 	if (addr.mask != IPAddress::IPV6_DEFAULT_MASK) {
 		result << "/" << std::dec << addr.mask;
 	}
@@ -379,7 +375,7 @@ string IPAddress::ToString() const {
 	if (type == IPAddressType::IP_ADDRESS_V6) {
 		return ToStringIPv6(*this);
 	}
-	
+
 	throw ConversionException("Invalid IPAddress");
 }
 

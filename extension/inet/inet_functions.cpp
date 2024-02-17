@@ -12,7 +12,7 @@
 namespace duckdb {
 
 // The address field is better represented as a uhugeint_t, but the original implementation
-// used hugeint_t so maintain backward-compatibility. Operations on the address values will 
+// used hugeint_t so maintain backward-compatibility. Operations on the address values will
 // use the unsigned variant, so use the functions below to convert to/from the compatible
 // representation.
 using INET_TYPE = StructTypeTernary<uint8_t, hugeint_t, uint16_t>;
@@ -21,7 +21,7 @@ static uhugeint_t from_compat_addr(hugeint_t compat_addr, IPAddressType addr_typ
 	uhugeint_t retval = static_cast<uhugeint_t>(compat_addr);
 	// Only flip the bit for order on IPv6 addresses. It can never be set in IPv4
 	if (addr_type == IPAddressType::IP_ADDRESS_V6) {
-		// Flip the top bit so that the ordering of hugeint works as expected, and 
+		// Flip the top bit so that the ordering of hugeint works as expected, and
 		// not as if was actually a signed value.
 		return retval ^ (uhugeint_t(1) << 127);
 	}
@@ -31,7 +31,7 @@ static uhugeint_t from_compat_addr(hugeint_t compat_addr, IPAddressType addr_typ
 
 static hugeint_t to_compat_addr(uhugeint_t new_addr, IPAddressType addr_type) {
 	if (addr_type == IPAddressType::IP_ADDRESS_V6) {
-		// Flip the top bit back so that the bit values are correct for display and 
+		// Flip the top bit back so that the bit values are correct for display and
 		// operations.
 		return static_cast<hugeint_t>(new_addr ^ (uhugeint_t(1) << 127));
 	}
@@ -89,9 +89,10 @@ bool INetFunctions::CastINETToVarchar(Vector &source, Vector &result, idx_t coun
 void INetFunctions::Host(DataChunk &args, ExpressionState &state, Vector &result) {
 	GenericExecutor::ExecuteUnary<INET_TYPE, PrimitiveType<string_t>>(
 	    args.data[0], result, args.size(), [&](INET_TYPE input) {
-			auto inetType = IPAddressType(input.a_val);
-			auto mask = inetType == IPAddressType::IP_ADDRESS_V4 ? IPAddress::IPV4_DEFAULT_MASK : IPAddress::IPV6_DEFAULT_MASK;
-			auto unsigned_addr = from_compat_addr(input.b_val, inetType);
+		    auto inetType = IPAddressType(input.a_val);
+		    auto mask =
+		        inetType == IPAddressType::IP_ADDRESS_V4 ? IPAddress::IPV4_DEFAULT_MASK : IPAddress::IPV6_DEFAULT_MASK;
+		    auto unsigned_addr = from_compat_addr(input.b_val, inetType);
 		    IPAddress inet(inetType, unsigned_addr, mask);
 		    auto str = inet.ToString();
 		    return StringVector::AddString(result, str);
@@ -106,30 +107,29 @@ static INET_TYPE add_implementation(INET_TYPE ip, hugeint_t val) {
 
 	if (val >= 0) {
 		result.b_val = to_compat_addr(
-			AddOperatorOverflowCheck::Operation<uhugeint_t, uhugeint_t, uhugeint_t>(
-			from_compat_addr(ip.b_val, addr_type), NumericCast::Operation<hugeint_t, uhugeint_t>(val)
-		), addr_type);
+		    AddOperatorOverflowCheck::Operation<uhugeint_t, uhugeint_t, uhugeint_t>(
+		        from_compat_addr(ip.b_val, addr_type), NumericCast::Operation<hugeint_t, uhugeint_t>(val)),
+		    addr_type);
 	} else {
-		result.b_val = to_compat_addr(SubtractOperatorOverflowCheck::Operation<uhugeint_t, uhugeint_t, uhugeint_t>(
-			from_compat_addr(ip.b_val, addr_type), NumericCast::Operation<hugeint_t, uhugeint_t>(-val)
-		), addr_type);
+		result.b_val = to_compat_addr(
+		    SubtractOperatorOverflowCheck::Operation<uhugeint_t, uhugeint_t, uhugeint_t>(
+		        from_compat_addr(ip.b_val, addr_type), NumericCast::Operation<hugeint_t, uhugeint_t>(-val)),
+		    addr_type);
 	}
-	
+
 	return result;
 }
 
 void INetFunctions::Subtract(DataChunk &args, ExpressionState &state, Vector &result) {
 	GenericExecutor::ExecuteBinary<INET_TYPE, PrimitiveType<hugeint_t>, INET_TYPE>(
-	    args.data[0], args.data[1], result, args.size(), [&](INET_TYPE ip, PrimitiveType<hugeint_t> val) {
-			return add_implementation(ip, -val.val);
-	    });
+	    args.data[0], args.data[1], result, args.size(),
+	    [&](INET_TYPE ip, PrimitiveType<hugeint_t> val) { return add_implementation(ip, -val.val); });
 }
 
 void INetFunctions::Add(DataChunk &args, ExpressionState &state, Vector &result) {
 	GenericExecutor::ExecuteBinary<INET_TYPE, PrimitiveType<hugeint_t>, INET_TYPE>(
-	    args.data[0], args.data[1], result, args.size(), [&](INET_TYPE ip, PrimitiveType<hugeint_t> val) {
-			return add_implementation(ip, val.val);
-	    });
+	    args.data[0], args.data[1], result, args.size(),
+	    [&](INET_TYPE ip, PrimitiveType<hugeint_t> val) { return add_implementation(ip, val.val); });
 }
 
 } // namespace duckdb
