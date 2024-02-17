@@ -45,3 +45,8 @@ SELECT INET '127.0.0.31' - -32;
 statement error
 SELECT INET '0.0.0.0' - 32;
 ----
+
+# overflow
+statement error
+select INET '255.255.255.255' + 1
+----
