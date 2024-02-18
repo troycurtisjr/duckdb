@@ -14,13 +14,13 @@ constexpr static const int32_t MAX_QUIBBLE_DIGITS = 4;
 IPAddress::IPAddress() : type(IPAddressType::IP_ADDRESS_INVALID) {
 }
 
-IPAddress::IPAddress(IPAddressType type, hugeint_t address, uint16_t mask) : type(type), address(address), mask(mask) {
+IPAddress::IPAddress(IPAddressType type, uhugeint_t address, uint16_t mask) : type(type), address(address), mask(mask) {
 }
 
 IPAddress IPAddress::FromIPv4(int32_t address, uint16_t mask) {
 	return IPAddress(IPAddressType::IP_ADDRESS_V4, address, mask);
 }
-IPAddress IPAddress::FromIPv6(hugeint_t address, uint16_t mask) {
+IPAddress IPAddress::FromIPv6(uhugeint_t address, uint16_t mask) {
 	return IPAddress(IPAddressType::IP_ADDRESS_V6, address, mask);
 }
 
@@ -29,6 +29,17 @@ static bool IPAddressError(string_t input, string *error_message, string error) 
 	HandleCastError::AssignError(e, error_message);
 	return false;
 }
+
+// Even though inet_pton() and inet_ntop() exist in network libraries, the
+// parsing and formatting functions are implemented in-line here to ensure
+// consistent behavior across implementations as well as provide better error
+// messages.
+//
+// Additionally, there wouldn't be much code savings since using
+// those functions would need to use pre-processor directives between Windows
+// and POSIX systems, temporary structures would need to be created and data
+// copied into and of them, and careful bytes swapping would be necessary to get
+// the resulting values into the proper native types.
 
 static bool TryParseIPv4(string_t input, IPAddress &result, string *error_message) {
 	auto data = input.GetData();
@@ -270,7 +281,7 @@ bool IPAddress::TryParse(string_t input, IPAddress &result, string *error_messag
 	return IPAddressError(input, error_message, "Expected an IP address");
 }
 
-static string ToStringIPv4(const hugeint_t &address, const uint8_t mask) {
+static string ToStringIPv4(const uhugeint_t &address, const uint8_t mask) {
 	string result;
 	for (idx_t i = 0; i < 4; i++) {
 		if (i > 0) {

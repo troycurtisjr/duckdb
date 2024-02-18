@@ -11,6 +11,7 @@
 #include "duckdb/common/common.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/string_type.hpp"
+#include "duckdb/common/uhugeint.hpp"
 
 namespace duckdb {
 
@@ -25,15 +26,15 @@ public:
 
 public:
 	IPAddress();
-	IPAddress(IPAddressType type, hugeint_t address, uint16_t mask);
+	IPAddress(IPAddressType type, uhugeint_t address, uint16_t mask);
 
 	IPAddressType type;
-	hugeint_t address;
+	uhugeint_t address;
 	uint16_t mask;
 
 public:
 	static IPAddress FromIPv4(int32_t address, uint16_t mask);
-	static IPAddress FromIPv6(hugeint_t address, uint16_t mask);
+	static IPAddress FromIPv6(uhugeint_t address, uint16_t mask);
 	static bool TryParse(string_t input, IPAddress &result, string *error_message);
 	static IPAddress FromString(string_t input);
 
